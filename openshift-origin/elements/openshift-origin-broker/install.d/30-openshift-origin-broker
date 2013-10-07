@@ -2,69 +2,67 @@
 
 set -uex
 
+yum clean all
+yum -y update
+
 install-packages \
-    openshift-origin-broker \
-    rubygem-openshift-origin-msg-broker-mcollective \
-    rubygem-openshift-origin-dns-nsupdate \
-    rubygem-openshift-origin-dns-bind \
-    rubygem-openshift-origin-controller \
-    openshift-origin-broker-util \
-    rubygem-passenger \
-    mod_passenger \
-    openssh \
-    rubygem-openshift-origin-auth-mongo \
-    rubygem-openshift-origin-remote-user \
-    rubygem-openshift-origin-console \
-    openshift-origin-console \
-    mongodb \
-    mongodb-server \
-    bind \
-    bind-utils \
-    ntpdate \
-    policycoreutils \
-    mcollective \
-    httpd \
-    openssh-server \
-    rhc \
-    activemq \
-    activemq-client \
-    git \
-    puppet \
-    ruby \
-    ruby-devel \
-    ruby-irb \
-    ruby-libs \
-    tar \
-    yum-plugin-priorities \
-    mysql-devel \
-    mongodb-devel \
-    system-config-firewall-base \
-    rubygem-execjs \
-    rubygem-uglifier \
-    rubygem-listen \
-    rubygem-sass \
-    rubygem-sass-rails \
-    autogen-libopts \
-    ntp \
-    rubygem-coffee-script-source \
-    rubygem-coffee-script \
-    rubygem-coffee-rails \
-    rubygem-idn \
-    rubygem-addressable \
-    rubygem-crack \
-    rubygem-webmock \
-    rubygem-fakefs \
-    rubygem-chunky_png \
-    rubygem-hpricot \
-    rubygem-haml \
-    rubygem-fssm \
-    rubygem-compass \
-    rubygem-compass-rails \
-    rubygem-mongo \
-    rubygem-jquery-rails \
-    rubygem-openshift-origin-dns-avahi \
-    rubygem-ref \
-    rubygem-therubyracer
+  activemq \
+  activemq-client \
+  openshift-origin-broker \
+  openshift-origin-broker-util \
+  rubygem-openshift-origin-msg-broker-mcollective \
+  rubygem-openshift-origin-dns-nsupdate \
+  rhc \
+  openshift-origin-console \
+  iptables \
+  iptables-services \
+  system-config-firewall-base \
+  mcollective-client \
+  mongodb \
+  mongodb-server \
+  bind \
+  bind-utils \
+  rubygem-openshift-origin-auth-remote-user \
+  pam_openshift \
+  rubygem-openshift-origin-dns-nsupdate \
+  httpd \
+  openssh \
+  mongodb \
+  mongodb-server \
+  ntpdate \
+  policycoreutils \
+  openssh-server \
+  puppet \
+  tar \
+  yum-plugin-priorities \
+  ntp \
+  wget \
+  unzip \
+  vim \
+  mlocate
 
 sed --in-place -e s/Type=oneshot/"Type=oneshot\nTimeoutSec=0"/ /lib/systemd/system/cloud-final.service
+
+puppet module install openshift/openshift_origin
+
+cat <<EOF > /root/configure_origin.pp
+class { 'openshift_origin' :
+  roles                      => ['broker','activemq','datastore','named'],
+  install_method             => 'none',
+  domain                     => 'example.com',
+  broker_hostname            => 'broker.example.com',
+  named_hostname             => 'broker.example.com',
+  datastore_hostname         => 'broker.example.com',
+  activemq_hostname          => 'broker.example.com',
+  openshift_user1            => 'admin',
+  openshift_password1        => 'admin',
+  bind_key                   => 'u0MUGq/dgmLi9FAqS8Wiu5MkpjCmrchLeteu17BP/IcSmh9M8Z6vE9mzvsoZaPGYU90BwlmKT8cAAkRezLnE0g==',
+  development_mode           => true,
+  register_host_with_named   => true,
+  broker_auth_plugin         => 'mongo',
+  conf_broker_auth_salt      => 'salt salt salt',
+  node_unmanaged_users       => ['fedora'],
+  firewall_provider          => 'lokkit',
+}
+EOF
 
