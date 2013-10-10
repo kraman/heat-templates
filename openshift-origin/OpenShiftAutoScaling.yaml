@@ -1,74 +1,94 @@
-HeatTemplateFormatVersion: '2012-12-12'
-Description: Template for setting up an AutoScaled OpenShift Origin environment
-Parameters:
-  KeyName:
-    Description: Name of an existing keypair to enable SSH access to the instances
-    Type: String
-    MinLength: '1'
-    MaxLength: '64'
+heat_template_version: 2013-05-23
+
+description: Auto-Scaling OpenShift Environment
+
+parameters:
+  key_name:
+    description: Name of an existing keypair to enable SSH access to the instances
+    type: String
     AllowedPattern: '[-_ a-zA-Z0-9]*'
-  Prefix:
-    Description: Your DNS Prefix
-    Type: String
-    Default: example.com
+  prefix:
+    description: Your DNS Prefix
+    type: String
+    default: example.com
+  openshift_user:
+    description: Default User Name
+    type: String
+    default: openshift
+  openshift_password:
+    description: Default User Password
+    type: String
+    default: openshift
   UpstreamDNS:
-    Description: Upstream DNS server
-    Type: String
-    Default: 8.8.8.8
-  BrokerServerFlavor:
-    Description: Flavor of broker server
-    Type: String
-    Default: m1.small
-    AllowedValues: [m1.small, m1.medium, m1.large, m1.xlarge]
-    ConstraintDescription: Must be a valid server flavor
-  NodeServerFlavor:
-    Description: Flavor of node servers
-    Type: String
-    Default: m1.small
-    AllowedValues: [m1.small, m1.medium, m1.large, m1.xlarge]
-    ConstraintDescription: Must be a valid server flavor
-  NodeCountMinimum:
-    Description: Minimum number of nodes to scale down to
-    Type: String
-    Default: '1'
-    AllowedPattern: '[0-9]*'
-  NodeCountMaximum:
-    Description: Maximum number of nodes to scale up to
-    Type: String
-    Default: '3'
-    AllowedPattern: '[0-9]*'
-Mappings:
-  JeosImages:
-    Broker:
-      Image: F18-x86_64-openshift-origin-broker-cfntools
-    Node:
-      Image: F18-x86_64-openshift-origin-node-cfntools
-Resources:
-  OpenshiftUser:
-    Type: AWS::IAM::User
-  OpenshiftOriginKeys:
-    Type: AWS::IAM::AccessKey
+    description: Upstream DNS server
+    type: String
+    default: 8.8.8.8
+  broker_server_flavor:
+    description: Flavor of broker server
+    type: String
+    default: m1.small
+    allowed_values: [m1.small, m1.medium, m1.large, m1.xlarge]
+    Constraintdescription: Must be a valid server flavor
+  node_server_flavor:
+    description: Flavor of node servers
+    type: String
+    default: m1.small
+    allowed_values: [m1.small, m1.medium, m1.large, m1.xlarge]
+    Constraintdescription: Must be a valid server flavor
+resources:
+  openshift_origin_broker_security_group:
+    type: AWS::EC2::SecurityGroup
+    properties:
+      GroupDescription: Standard firewall rules
+      SecurityGroupIngress:
+      - {IpProtocol: udp, FromPort: '53', ToPort: '53', CidrIp: 0.0.0.0/0}
+      - {IpProtocol: tcp, FromPort: '53', ToPort: '53', CidrIp: 0.0.0.0/0}
+      - {IpProtocol: tcp, FromPort: '22', ToPort: '22', CidrIp: 0.0.0.0/0}
+      - {IpProtocol: tcp, FromPort: '80', ToPort: '80', CidrIp: 0.0.0.0/0}
+      - {IpProtocol: tcp, FromPort: '443', ToPort: '443', CidrIp: 0.0.0.0/0}
+  openshift_origin_node_security_group:
+    type: AWS::EC2::SecurityGroup
+    properties:
+      GroupDescription: Standard firewall rules
+      SecurityGroupIngress:
+      - {IpProtocol: tcp, FromPort: '22', ToPort: '22', CidrIp: 0.0.0.0/0}
+      - {IpProtocol: tcp, FromPort: '80', ToPort: '80', CidrIp: 0.0.0.0/0}
+      - {IpProtocol: tcp, FromPort: '443', ToPort: '443', CidrIp: 0.0.0.0/0}
+      - {IpProtocol: tcp, FromPort: '8000', ToPort: '8000', CidrIp: 0.0.0.0/0}
+      - {IpProtocol: tcp, FromPort: '8443', ToPort: '8443', CidrIp: 0.0.0.0/0}
+  BrokerWaitHandle:
+    type: AWS::CloudFormation::WaitConditionHandle
+  BrokerWaitCondition:
+    type: AWS::CloudFormation::WaitCondition
+    DependsOn: broker_server
     Properties:
-      UserName:
-        Ref: OpenshiftUser
-  OpenshiftOriginNodeGroup:
-    Type: AWS::AutoScaling::AutoScalingGroup
-    DependsOn: BrokerWaitCondition
+      Handle:
+        Ref: BrokerWaitHandle
+      Timeout: '6000'
+  NodeWaitHandle:
+    type: AWS::CloudFormation::WaitConditionHandle
+  NodeWaitCondition:
+    type: AWS::CloudFormation::WaitCondition
     Properties:
-      AvailabilityZones: []
-      LaunchConfigurationName:
-        Ref: NodeLaunchConfig
-      MinSize:
-        Ref: NodeCountMinimum
-      MaxSize:
-        Ref: NodeCountMaximum
-      LoadBalancerNames: []
+      Handle:
+        Ref: NodeWaitHandle
+      Timeout: '6000'    
+  oong: #OpenshiftOriginNodeGroup
+      Type: AWS::AutoScaling::AutoScalingGroup
+      DependsOn: BrokerWaitCondition
+      Properties:
+        AvailabilityZones: []
+        LaunchConfigurationName:
+          Ref: oon
+        MinSize: '1'
+        MaxSize: '3'
+        LoadBalancerNames: []   
   OpenshiftOriginScaleUpPolicy:
     Type: AWS::AutoScaling::ScalingPolicy
     Properties:
       AdjustmentType: ChangeInCapacity
       AutoScalingGroupName:
-        Ref: OpenshiftOriginNodeGroup
+        Ref: oong
       Cooldown: '120'
       ScalingAdjustment: '1'
   OpenshiftOriginScaleDownPolicy:
@@ -76,7 +96,7 @@ Resources:
     Properties:
       AdjustmentType: ChangeInCapacity
       AutoScalingGroupName:
-        Ref: OpenshiftOriginNodeGroup
+        Ref: oong
       Cooldown: '60'
       ScalingAdjustment: '-1'
   NodeScaleUp:
@@ -93,7 +113,7 @@ Resources:
       Dimensions:
       - Name: AutoScalingGroupName
         Value:
-          Ref: OpenshiftOriginNodeGroup
+          Ref: oong
       ComparisonOperator: GreaterThanThreshold
   NodeScaleDown:
     Type: AWS::CloudWatch::Alarm
@@ -109,282 +129,190 @@ Resources:
       Dimensions:
       - Name: AutoScalingGroupName
         Value:
-          Ref: OpenshiftOriginNodeGroup
-      ComparisonOperator: GreaterThanThreshold
-  OpenShiftOriginSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
+          Ref: oong
+      ComparisonOperator: GreaterThanThreshold    
+
+  broker_server:
+    Type: OS::Nova::Server
     Properties:
-      GroupDescription: Standard firewall rules
-      SecurityGroupIngress:
-      - {IpProtocol: udp, FromPort: '53', ToPort: '53', CidrIp: 0.0.0.0/0}
-      - {IpProtocol: tcp, FromPort: '53', ToPort: '53', CidrIp: 0.0.0.0/0}
-      - {IpProtocol: tcp, FromPort: '22', ToPort: '22', CidrIp: 0.0.0.0/0}
-      - {IpProtocol: tcp, FromPort: '80', ToPort: '80', CidrIp: 0.0.0.0/0}
-      - {IpProtocol: tcp, FromPort: '443', ToPort: '443', CidrIp: 0.0.0.0/0}
-      - {IpProtocol: tcp, FromPort: '8000', ToPort: '8000', CidrIp: 0.0.0.0/0}
-      - {IpProtocol: tcp, FromPort: '8443', ToPort: '8443', CidrIp: 0.0.0.0/0}
-  BrokerWaitHandle:
-    Type: AWS::CloudFormation::WaitConditionHandle
-  BrokerWaitCondition:
-    Type: AWS::CloudFormation::WaitCondition
-    DependsOn: BrokerInstance
+      image: 'F19-x86_64-openshift-origin-broker-cfntools'
+      flavor: { get_param: broker_server_flavor }
+      key_name: { get_param: key_name }
+      security_groups: [{ get_resource: openshift_origin_broker_security_group }]
+      user_data:
+        str_replace:
+          template: |
+            #!/bin/bash -x
+            
+            # All is well so signal success
+            cat <<EOF > /root/debug.txt
+            domain = DOMAIN
+            user   = OPENSHIFT_USER
+            pass   = OPENSHIFT_PASSWORD
+            wait handle = BROKER_WAIT_HANDLE
+            EOF
+            
+            echo "broker.DOMAIN" > /etc/hostname
+            hostname broker.DOMAIN
+            
+            rm -rf /var/named/K*.*.*
+            /usr/sbin/dnssec-keygen -a HMAC-MD5 -b 512 -n USER -r /dev/urandom -K /var/named DOMAIN
+            KEY=$(cat /var/named/KDOMAIN*.key | awk ' { print $7$8 }')
+            
+            puppet module install openshift/openshift_origin
+            cat <<EOF > /root/configure_origin.pp
+            class { 'openshift_origin' :
+              roles                      => ['broker','activemq','datastore','named'],
+              install_method             => 'none',
+              domain                     => 'DOMAIN',
+              broker_hostname            => 'broker.DOMAIN',
+              named_hostname             => 'broker.DOMAIN',
+              datastore_hostname         => 'localhost',
+              activemq_hostname          => 'broker.DOMAIN',
+              node_ip_addr               => \$ec2_public_ipv4,
+              bind_key                   => "$KEY",
+              development_mode           => true,
+              register_host_with_named   => true,
+              broker_auth_plugin         => 'mongo',
+              conf_broker_auth_salt      => 'salt salt salt',
+              firewall_provider          => 'lokkit',
+              openshift_user1            => 'OPENSHIFT_USER',
+              openshift_password1        => 'OPENSHIFT_PASSWORD'
+            }
+            EOF
+            
+            puppet apply --verbose /root/configure_origin.pp
+            
+            for s in 'mongod' 'activemq' 'named' 'openshift-broker' 'openshift-console' 'sshd' 'httpd'; do
+              service $s stop
+            done
+            for s in 'mongod' 'activemq' 'named' 'openshift-broker' 'openshift-console' 'sshd' 'httpd'; do
+              service $s start
+            done
+            
+            rm -rf /var/www/openshift/broker/tmp/cache/*
+            /sbin/service network restart || /sbin/service network reload
+            
+            cat << EOF > /usr/sbin/heat-notify-scale-up
+            #!/bin/bash
+            /opt/aws/bin/cfn-push-stats --credential-file /etc/heat/heat-credentials --heartbeat --watch {Ref: NodeScaleUp}
+            EOF
+            chmod 0700 /usr/sbin/heat-notify-scale-up
+            
+            cat << EOF > /usr/sbin/heat-notify-scale-down
+            #!/bin/bash
+            /opt/aws/bin/cfn-push-stats --credential-file /etc/heat/heat-credentials --heartbeat --watch{Ref: NodeScaleDown}
+            chmod 0700 /usr/sbin/heat-notify-scale-down
+            EOF
+            
+            /opt/aws/bin/cfn-signal -e 0 --data "$KEY" -r "Broker setup complete" "BROKER_WAIT_HANDLE"
+            setenforce 1
+          params:
+            DOMAIN: { get_param: prefix }
+            BROKER_WAIT_HANDLE: { get_resource: BrokerWaitHandle }
+            OPENSHIFT_USER: { get_param: openshift_user }
+            OPENSHIFT_PASSWORD: { get_param: openshift_password }
+  CfnUser:
+     Type: 'AWS::IAM::User'
+     DependsOn: BrokerWaitHandle
+  ServerKeys:
+    Type: 'AWS::IAM::AccessKey'
+    DependsOn: CfnUser
     Properties:
-      Handle:
-        Ref: BrokerWaitHandle
-      Timeout: '6000'
-  BrokerInstance:
-    Type: AWS::EC2::Instance
-    Properties:
-      ImageId:
-        Fn::FindInMap: [JeosImages, Broker, Image]
-      InstanceType:
-        Ref: BrokerServerFlavor
-      KeyName:
-        Ref: KeyName
-      SecurityGroups: [{Ref: OpenShiftOriginSecurityGroup}]
-      Tags:
-      - Key: Name
-        Value:
-          Fn::Join:
-          - '-'
-          - ['openshift', {Ref: Prefix}, 'broker']
-      UserData:
-        Fn::Base64:
-          Fn::Join:
-          - ''
-          - - |-
-                #!/bin/bash -x
-                export PREFIX=
-            - {Ref: Prefix}
-            - |-
-                
-                export UPSTREAM_DNS=
-            - {Ref: UpstreamDNS}
-            - |-
-                
-                export BROKER_WAIT_HANDLE="
-            - {Ref: BrokerWaitHandle}
-            - |-
-                "
-                /usr/sbin/dnssec-keygen -a HMAC-MD5 -b 512 -n USER -r /dev/urandom -K /var/named ${PREFIX}
-                export DNS_SEC_KEY="`cat /var/named/K${PREFIX}.*.key  | awk '{print $8}'`"
-                export EC2_INSTANCE_ID="`facter ec2_instance_id`"
-                export IP_ADDRESS="`facter ipaddress`"
-                mkdir -p /etc/heat
-                cat << EOF > /etc/heat/heat-credentials
-                AWSAccessKeyId=
-            - {Ref: OpenshiftOriginKeys}
-            - |-
-                
-                AWSSecretKey=
-            - Fn::GetAtt: [OpenshiftOriginKeys, SecretAccessKey]
-            - |-
-                
-                EOF
-                chmod 0400 /etc/heat/heat-credentials
-                
-                cat << EOF > /etc/heat/notify-scale-up
-                #!/bin/bash
-                /opt/aws/bin/cfn-push-stats --credential-file /etc/heat/heat-credentials --heartbeat --watch 
-            - {Ref: NodeScaleUp}
-            - |-
-                
-                EOF
-                chmod 0700 /etc/heat/notify-scale-up
-                
-                cat << EOF > /etc/heat/notify-scale-down
-                #!/bin/bash
-                /opt/aws/bin/cfn-push-stats --credential-file /etc/heat/heat-credentials --heartbeat --watch 
-            - {Ref: NodeScaleDown}
-            - |-
-                
-                EOF
-                chmod 0700 /etc/heat/notify-scale-down
-                
-                cat << EOF > /root/configure.pp
-                \$my_hostname="\${ec2_instance_id}.${PREFIX}"
-                file { "update network settings - hostname":
-                  path    => "/etc/sysconfig/network",
-                  content => "NETWORKING=yes\nNETWORKING_IPV6=no\nHOSTNAME=\${my_hostname}"
-                }
-                exec { "set hostname":
-                  command => "/bin/hostname \${my_hostname} ; echo \${my_hostname} > /etc/hostname"
-                }
-                augeas{ "etc hosts setup" :
-                  context => "/files/etc/hosts",
-                  changes => [
-                    "set 01/ipaddr \${ipaddress}",
-                    "set 01/canonical \${my_hostname}",
-                  ],
-                }
-                augeas{ "network peerdns setup" :
-                  context => "/files/etc/sysconfig/network-scripts/ifcfg-eth0",
-                  changes => [
-                    "set PEERDNS no",
-                  ],
-                }
-                class { 'openshift_origin' :
-                  node_fqdn                  => \$my_hostname,
-                  cloud_domain               => '${PREFIX}',
-                  named_tsig_priv_key        => '${DNS_SEC_KEY}',
-                  dns_servers                => ['${UPSTREAM_DNS}'],
-                  os_unmanaged_users         => ['ec2-user'],
-                  enable_network_services    => true,
-                  configure_firewall         => true,
-                  configure_ntp              => true,
-                  configure_activemq         => true,
-                  configure_qpid             => false,
-                  configure_mongodb          => true,
-                  configure_named            => true,
-                  configure_broker           => true,
-                  configure_console          => true,
-                  configure_node             => false,
-                  development_mode           => true,
-                  named_ipaddress            => \$ipaddress,
-                  mongodb_fqdn               => \$my_hostname,
-                  mq_fqdn                    => \$my_hostname,
-                  broker_fqdn                => \$my_hostname,
-                }
-                EOF
-                mkdir -p /etc/puppet/modules
-                puppet module install openshift/openshift_origin
-                puppet apply --verbose /root/configure.pp | tee /var/log/configure_openshift.log
-                setsebool -P httpd_unified=on
-                service network restart | tee /var/log/configure_openshift.log;
-                service mongod restart | tee /var/log/configure_openshift.log;
-                service activemq restart | tee /var/log/configure_openshift.log;
-                service httpd restart | tee /var/log/configure_openshift.log;
-                service openshift-broker restart | tee /var/log/configure_openshift.log;
-                service openshift-console restart | tee /var/log/configure_openshift.log;
-                service named restart | tee /var/log/configure_openshift.log;
-                cat << EOF > /etc/resolv.conf
-                ; generated by heat
-                search ${PREFIX}
-                nameserver 127.0.0.1
-                EOF
-                cat << _EOF > /root/nsupdate.cmd
-                key ${PREFIX} ${DNS_SEC_KEY}
-                server ${IP_ADDRESS} 53
-                update delete ${EC2_INSTANCE_ID}.${PREFIX} A
-                update add    ${EC2_INSTANCE_ID}.${PREFIX} 180 A ${IP_ADDRESS}
-                send
-                _EOF
-                cat /root/nsupdate.cmd | nsupdate
-                setenforce 1
-                # All is well so signal success
-                /opt/aws/bin/cfn-signal -e 0 --data "${DNS_SEC_KEY}" -r "Broker setup complete" "${BROKER_WAIT_HANDLE}"
-  NodeLaunchConfig:
+      UserName:
+        Ref: CfnUser
+  oon: #node_instance
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
-      ImageId:
-        Fn::FindInMap: [JeosImages, Node, Image]
-      InstanceType:
-        Ref: NodeServerFlavor
-      KeyName:
-        Ref: KeyName
-      SecurityGroups: [{Ref: OpenShiftOriginSecurityGroup}]
+      ImageId: 'F19-x86_64-openshift-origin-node-cfntools'
+      InstanceType: { get_param: node_server_flavor }
+      KeyName: { get_param: key_name }
+      SecurityGroups: [{ get_resource: openshift_origin_node_security_group }]
       UserData:
-        Fn::Base64:
-          Fn::Join:
-          - ''
-          - - |-
-                #!/bin/bash -x
-                export DNS_SEC_KEY="`python -c 'print 
-            - Fn::GetAtt: [BrokerWaitCondition, Data]
-            - |-
-                ["00000"]'`"
-                export BROKER_IP=
-            - Fn::GetAtt: [BrokerInstance, PublicIp]
-            - |-
-                
-                export PREFIX=
-            - {Ref: Prefix}
-            - |-
-                
-                export EC2_INSTANCE_ID="`facter ec2_instance_id`"
-                export IP_ADDRESS="`facter ipaddress`"
-                cat << EOF > /root/configure.pp
-                \$my_hostname="\${ec2_instance_id}.${PREFIX}"
-                file { "update network settings - hostname":
-                  path    => "/etc/sysconfig/network",
-                  content => "NETWORKING=yes\nNETWORKING_IPV6=no\nHOSTNAME=\${my_hostname}"
-                }
-                exec { "set hostname":
-                  command => "/bin/hostname \${my_hostname} ; echo \${my_hostname} > /etc/hostname"
-                }
-                augeas{ "etc hosts setup" :
-                  context => "/files/etc/hosts",
-                  changes => [
-                    "set 01/ipaddr \${ipaddress}",
-                    "set 01/canonical \${my_hostname}",
-                  ],
-                }
-                augeas{ "network peerdns setup" :
-                  context => "/files/etc/sysconfig/network-scripts/ifcfg-eth0",
-                  changes => [
-                    "set PEERDNS no",
-                  ],
-                }
-                class { "openshift_origin" :
-                  node_fqdn                  => \$my_hostname,
-                  cloud_domain               => '${PREFIX}',
-                  named_tsig_priv_key        => '${DNS_SEC_KEY}',
-                  dns_servers                => ['${BROKER_IP}'],
-                  os_unmanaged_users         => ['ec2-user'],
-                  enable_network_services    => true,
-                  configure_firewall         => true,
-                  configure_ntp              => true,
-                  configure_activemq         => false,
-                  configure_qpid             => false,
-                  configure_mongodb          => false,
-                  configure_named            => false,
-                  configure_broker           => false,
-                  configure_console          => false,
-                  configure_node             => true,
-                  development_mode           => true,
-                  named_ipaddress            => '${BROKER_IP}',
-                  mongodb_fqdn               => '${BROKER_IP}',
-                  mq_fqdn                    => '${BROKER_IP}',
-                  broker_fqdn                => '${BROKER_IP}',
-                }
-                EOF
-                mkdir -p /etc/puppet/modules
-                puppet module install openshift/openshift_origin
-                puppet apply --verbose /root/configure.pp | tee /var/log/configure_openshift.log;
-                service network restart | tee /var/log/configure_openshift.log;
-                service cgconfig restart | tee /var/log/configure_openshift.log;
-                service cgred restart | tee /var/log/configure_openshift.log;
-                service openshift-cgroups restart | tee /var/log/configure_openshift.log;
-                service openshift-node-web-proxy restart | tee /var/log/configure_openshift.log;
-                service openshift-gears restart | tee /var/log/configure_openshift.log;
-                service openshift-port-proxy restart | tee /var/log/configure_openshift.log;
-                service mcollective restart | tee /var/log/configure_openshift.log;
-                service httpd restart | tee /var/log/configure_openshift.log;
-                service sshd restart | tee /var/log/configure_openshift.log;
-                cat << EOF > /etc/resolv.conf
-                ; generated by heat
-                search ${PREFIX}
-                nameserver ${BROKER_IP}
-                EOF
-                cat << _EOF > /root/nsupdate.cmd
-                key ${PREFIX} ${DNS_SEC_KEY}
-                server ${BROKER_IP} 53
-                update delete ${EC2_INSTANCE_ID}.${PREFIX} A
-                update add    ${EC2_INSTANCE_ID}.${PREFIX} 180 A ${IP_ADDRESS}
-                send
-                _EOF
-                cat /root/nsupdate.cmd | nsupdate
-                setenforce 1
-Outputs:
+        str_replace:
+          template: |
+            #!/bin/bash -x
+            
+            cat <<EOF > /root/debug.txt
+            domain = DOMAIN
+            bip = BROKER_IP
+            AWSAccessKeyId = AWS_KEY
+            AWSSecretKey = AWS_SECRET
+            stack name = STACK_NAME
+            EOF
+            
+            mkdir -p /etc/cfn
+            cat <<EOF > /etc/cfn/cfn-credentials
+            AWSAccessKeyId=AWS_KEY
+            AWSSecretKey=AWS_SECRET
+            EOF
+            chmod 000400 /etc/cfn/cfn-credentials
+            
+            BIND_KEY=$(cfn-get-metadata -r BrokerWaitHandle -s STACK_NAME --credential-file /etc/cfn/cfn-credentials 2> /dev/null | ruby -r 'json' -e "print JSON[STDIN.read].values[0]['Data']")
+            host=$(facter ec2_instance_id)
+            
+            echo "${host}.DOMAIN" > /etc/hostname
+            hostname "${host}.DOMAIN"
+            
+            puppet module install openshift/openshift_origin
+            cat <<EOF > /root/configure_origin.pp
+            class { 'openshift_origin' :
+              roles                                => ['node'],
+              install_method                       => 'none',
+              domain                               => 'DOMAIN',
+              broker_hostname                      => 'broker.DOMAIN',
+              node_hostname                        => "\${ec2_instance_id}.DOMAIN",
+              named_hostname                       => 'broker.DOMAIN',
+              activemq_hostname                    => 'broker.DOMAIN',
+              datastore_hostname                   => 'broker.DOMAIN',
+              named_ip_addr                        => 'BROKER_IP',
+              bind_key                             => '$BIND_KEY',
+              broker_ip_addr                       => 'BROKER_IP',
+              node_ip_addr                         => \$ec2_public_ipv4,
+              conf_valid_gear_sizes                => ['small'],
+              node_unmanaged_users                 => ['ec2-user'],
+              conf_node_external_eth_dev           => 'eth0',
+              development_mode                     => true,
+              conf_named_upstream_dns              => ['UPSTREAM_DNS'],
+              register_host_with_named             => true,
+            }
+            EOF
+            
+            puppet apply --verbose /root/configure_origin.pp
+            for s in 'cgconfig' 'cgred' 'openshift-node-web-proxy' 'sshd' 'httpd' 'mcollective'; do
+              service $s stop
+            done
+            
+            for s in 'cgconfig' 'cgred' 'openshift-node-web-proxy' 'sshd' 'httpd' 'mcollective'; do
+              service $s start
+            done
+            /etc/cron.minutely/openshift-facts
+            /sbin/service openshift-tc start || /sbin/service openshift-tc reload
+            /sbin/service network restart || /sbin/service network reload
+            /sbin/service messagebus restart
+            /sbin/service oddjobd restart
+            
+            /opt/aws/bin/cfn-signal -e 0 -r "Node ${host}.DOMAIN setup complete" "NODE_WAIT_HANDLE"
+            setenforce 1
+          params:
+            DOMAIN: { get_param: prefix }
+            UPSTREAM_DNS: { get_param: UpstreamDNS }
+            BROKER_IP: { get_attr: [ broker_server, first_address ] }
+            AWS_KEY: { get_resource: ServerKeys }
+            AWS_SECRET: { get_attr: [ServerKeys, SecretAccessKey ] }
+            STACK_NAME: { get_param: 'AWS::StackName' }
+            NODE_WAIT_HANDLE: { get_resource: NodeWaitHandle }            
+
+outputs:
   OpenShiftConsole:
     Value:
       Fn::Join:
       - ''
-      - ['https://', 'Fn::GetAtt': [BrokerInstance, PublicIp], '/console']
-    Description: URL for OpenShift Origins console
+      - ['https://', { get_attr: [ broker_server, first_address ] } , '/console']
+    description: URL for OpenShift Origins console
   NameServerEntry:
     Value:
       Fn::Join:
       - ''
-      - ['nameserver ', 'Fn::GetAtt': [BrokerInstance, PublicIp]]
-    Description: Entry to insert into /etc/resolv.conf for application host names to resolve
+      - ['nameserver ', { get_attr: [ broker_server, first_address ] } ]
+    description: Entry to insert into /etc/resolv.conf for application host names to resolve

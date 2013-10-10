@@ -43,26 +43,3 @@ install-packages \
 
 sed --in-place -e s/Type=oneshot/"Type=oneshot\nTimeoutSec=0"/ /lib/systemd/system/cloud-final.service
 
-puppet module install openshift/openshift_origin
-
-cat <<EOF > /root/configure_origin.pp
-class { 'openshift_origin' :
-  roles                      => ['broker','activemq','datastore','named'],
-  install_method             => 'none',
-  domain                     => 'example.com',
-  broker_hostname            => 'broker.example.com',
-  named_hostname             => 'broker.example.com',
-  datastore_hostname         => 'broker.example.com',
-  activemq_hostname          => 'broker.example.com',
-  openshift_user1            => 'admin',
-  openshift_password1        => 'admin',
-  bind_key                   => 'u0MUGq/dgmLi9FAqS8Wiu5MkpjCmrchLeteu17BP/IcSmh9M8Z6vE9mzvsoZaPGYU90BwlmKT8cAAkRezLnE0g==',
-  development_mode           => true,
-  register_host_with_named   => true,
-  broker_auth_plugin         => 'mongo',
-  conf_broker_auth_salt      => 'salt salt salt',
-  node_unmanaged_users       => ['fedora'],
-  firewall_provider          => 'lokkit',
-}
-EOF
-
